@@ -5,19 +5,51 @@ class Library():
         self.books = {}
 
     def add_book(self, book):
-        self.books[book.name] = book
+        self.books[(book.name, book.copy_id)] = book
 
-    def describe(self, name):
-        book = self.books.get(name)
-        book.describe(book)
+    def get_book(self, name, copy_id):
+        return self.books.get((name, copy_id))
+
+    def describe(self, name, copy_id):
+        book = self.get_book(name, copy_id)
+        if book:
+            book.describe()
+        else:
+            print(f"No copy {copy_id} of {name} found.")
 
     def list_books(self):
         for book in self.books.values():
-            self.describe(book.name)
+            book.describe()
 
+    def search(self, search_term):
+        found_books = []
+        for book in self.books.values():
+            if search_term.lower() in book.name.lower():
+                found_books.append(book)
+        if  len(found_books) > 0:
+            print(f"{len(found_books)} books found in our system with search term: {search_term}")
+            for book in found_books:
+                book.describe()
+
+    def internal_available_search(self, search_term):
+        found_books = []
+        for book in self.books.values():
+            if (search_term.lower() in book.name.lower()) and book.is_checked_out == "Available":
+                found_books.append(book)
+        if len(found_books) > 0:
+            return found_books
+
+    def internal_checked_out_search(self, search_term):
+        found_books = []
+        for book in self.books.values():
+            if (search_term.lower() in book.name.lower()) and book.is_checked_out == "Checked Out":
+                found_books.append(book)
+        if len(found_books) > 0:
+            return found_books
     def checkout_book(self, name, patron, days=14):
-        if self.books.get(name):
-            book = self.books.get(name)
+        results = self.internal_available_search(name)
+        if (results != None) and (len(results) > 0):
+            book = results[0]
             if patron.current_loans < patron.max_loans:
                 if book and book.is_checked_out == "Available":
                     book.toggle_checkout_true()
@@ -28,26 +60,31 @@ class Library():
             else:
                 print(f"{patron.name} has max number of borrowed books checked out: {patron.max_loans}")
         else:
-            print("Book does not exist in our system.")
+            print("Book is not available.")
 
     def return_book(self, name, patron):
-        if name in self.books and name in patron.borrowed_books:
-            book = self.books.get(name)
-            patron_books = patron.borrowed_books
-            if book.name in patron_books:
-                book.toggle_checkout_false()
-                print(f"{book.name} by {book.author} checked in successfully.")
-                patron.return_book(book)
-            else:
-                print(f"{patron.name} has not checked out {book.name} by {book.author}")
-        else:
-            print(f"{name} is not in our catalog")
+        results = self.internal_checked_out_search(name)
+        if not results:
+            print(f"No copies of {name} are currently checked out in the library.")
+            return
+        patron_copies = [
+            book for book in results
+            if (book.name, book.copy_id) in patron.borrowed_books
+        ]
+        if not patron_copies:
+            print(f"{patron.name} has no copies of {name} to return.")
+            return
+        book = patron_copies[0]
+        book.toggle_checkout_false()
+        patron.return_book(book)
+        print(f"{book.name} by {book.author} (Copy ID {book.copy_id}) returned successfully by {patron.name}.")
 
 class Book():
-    def __init__(self, name, author, is_checked_out="Available"):
+    def __init__(self, name, author, copy_id: int, is_checked_out="Available"):
         self.name = name
         self.author = author
         self.is_checked_out = is_checked_out
+        self.copy_id = copy_id
 
     def toggle_checkout_true(self):
         self.is_checked_out = "Checked Out"
@@ -55,24 +92,24 @@ class Book():
     def toggle_checkout_false(self):
         self.is_checked_out = "Available"
 
-    def describe(self, book):
-        print(f"{book.name} by {book.author} - {book.is_checked_out}")
+    def describe(self):
+        print(f"{self.name} by {self.author}, Copy ID: {self.copy_id} - {self.is_checked_out}")
 
 class PhysicalBook(Book):
-    def __init__(self, name, author, shelf_location, is_checked_out="Available"):
-        super().__init__(name, author, is_checked_out)
+    def __init__(self, name, author, shelf_location, copy_id: int, is_checked_out="Available"):
+        super().__init__(name, author, copy_id, is_checked_out)
         self.shelf_location = shelf_location
 
-    def describe(self, book):
-        print(f"{book.name} by {book.author} - Shelf: {book.shelf_location} - {book.is_checked_out}")
+    def describe(self):
+        print(f"{self.name} by {self.author} - Shelf: {self.shelf_location}, Copy ID: {self.copy_id} - {self.is_checked_out}")
 
 class EBook(Book):
-    def __init__(self, name, author, file_size_mb, is_checked_out="Available"):
-        super().__init__(name, author, is_checked_out)
+    def __init__(self, name, author, file_size_mb, copy_id: int, is_checked_out="Available"):
+        super().__init__(name, author, copy_id, is_checked_out)
         self.file_size_mb = file_size_mb
 
-    def describe(self, book):
-        print(f"{book.name} by {book.author} - Size: {book.file_size_mb}mb - {book.is_checked_out}")
+    def describe(self):
+        print(f"{self.name} by {self.author} - Size: {self.file_size_mb}mb, Copy ID: {self.copy_id} - {self.is_checked_out}")
 
 class Patron():
     def __init__(self, name, max_loans):
@@ -82,47 +119,48 @@ class Patron():
         self.max_loans = max_loans
 
     def borrow_book(self, book):
-
-        self.borrowed_books[book.name] = book
-        self.current_loans += 1
+        key = (book.name, book.copy_id)
+        if key not in self.borrowed_books:
+            self.borrowed_books[key] = book
+            self.current_loans += 1
 
 
     def return_book(self, book):
-
-        self.borrowed_books.pop(book.name)
-        self.current_loans -= 1
+        key = (book.name, book.copy_id)
+        if key in self.borrowed_books:
+            self.borrowed_books.pop(key)
+            self.current_loans -= 1
 
     def list_loans(self):
         print(f"{self.name} currently has {self.current_loans} books checked out of a max of {self.max_loans}.")
 
 if __name__ == "__main__":
     library = Library()
-    alice = Patron("Alice", max_loans=2)
-    bob = Patron("Bob", max_loans=2)
+    alice = Patron("Alice", max_loans=3)
+    bob   = Patron("Bob", max_loans=3)
 
-    # Inventory
-    library.add_book(PhysicalBook("The Hobbit", "J.R.R. Tolkien", shelf_location="A3"))
-    library.add_book(EBook("1984", "George Orwell", file_size_mb=2.5))
+    # Add multiple copies (give unique copy_ids yourself)
+    library.add_book(PhysicalBook("The Hobbit", "J.R.R. Tolkien", shelf_location="A3", copy_id=1))
+    library.add_book(PhysicalBook("The Hobbit", "J.R.R. Tolkien", shelf_location="A3", copy_id=2))
+    library.add_book(EBook("1984", "George Orwell", file_size_mb=2.5, copy_id=1))
 
     print("\n--- Inventory ---")
     library.list_books()
 
-    # Checkouts with due dates
+    print("\n--- Search 'the' ---")
+    results = library.search("the")  # expect matches for The Hobbit
+    # print results in whatever format you design
+
     print("\n--- Checkouts ---")
-    library.checkout_book("1984", alice, days=7)      # should succeed
-    library.checkout_book("1984", bob)                # should fail (already checked out)
-    library.checkout_book("The Hobbit", alice)        # should succeed
-    library.checkout_book("The Hobbit", alice)        # should fail (already checked out or at limit)
+    library.checkout_book("The Hobbit", alice)  # gets one copy
+    library.checkout_book("The Hobbit", bob)    # gets the other copy
+    library.checkout_book("The Hobbit", alice)  # should fail (no copies left OR rule: already holds title)
 
-    # Show patron state
     print("\n--- Alice Loans ---")
-    alice.list_loans()  # implement however you like
+    alice.list_loans()
 
-    # Returns
     print("\n--- Returns ---")
-    library.return_book("1984", alice)                # should clear borrower/due date
-    library.return_book("1984", bob)                  # should warn: bob didn't borrow it
+    library.return_book("The Hobbit", alice)    # frees one copy
 
     print("\n--- Final Inventory ---")
     library.list_books()
-
